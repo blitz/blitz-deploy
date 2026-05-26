@@ -153,11 +153,6 @@ fn main() -> Result<()> {
                         break;
                     }
 
-                    println!(
-                        "Realising toplevel for {}: {}",
-                        config_name, output.output_path
-                    );
-
                     let current_toplevel = std::fs::read_link("/run/current-system")
                         .context("Failed to find toplevel of current system")?;
 
@@ -165,6 +160,11 @@ fn main() -> Result<()> {
                         println!("Current system is recent. Skipping deployment.");
                         break;
                     }
+
+                    println!(
+                        "Realising toplevel for {}: {}",
+                        config_name, output.output_path
+                    );
 
                     std::process::Command::new("nix-store")
                         .arg("--realise")
