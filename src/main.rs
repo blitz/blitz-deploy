@@ -173,29 +173,23 @@ fn main() -> Result<()> {
                     .status()
                     .context("Failed to realise output")?;
 
-                match &opts.action {
+                let nixos_rebuild_action = match &opts.action {
                     Action::Discover => unreachable!(),
-                    Action::Realise => {}
-                    Action::Switch => {
-                        std::process::Command::new("run0")
-                            .arg("nixos-rebuild")
-                            .arg("--no-reexec")
-                            .arg("--store-path")
-                            .arg(&output.output_path)
-                            .arg("switch")
-                            .status()
-                            .context("Failed to switch to realised output")?;
-                    }
-                    Action::Boot => {
-                        std::process::Command::new("run0")
-                            .arg("nixos-rebuild")
-                            .arg("--no-reexec")
-                            .arg("--store-path")
-                            .arg(&output.output_path)
-                            .arg("boot")
-                            .status()
-                            .context("Failed to boot to realised output")?;
-                    }
+                    Action::Realise => None,
+                    Action::Switch => Some("switch"),
+                    Action::Boot => Some("boot"),
+                };
+
+                if let Some(action) = nixos_rebuild_action {
+                    std::process::Command::new("nixos-rebuild")
+                        .arg("--sudo")
+                        .arg("--ask-sudo-password")
+                        .arg("--no-reexec")
+                        .arg("--store-path")
+                        .arg(&output.output_path)
+                        .arg(action)
+                        .status()
+                        .context("Failed to run nixos-rebuild")?;
                 }
             }
         }
