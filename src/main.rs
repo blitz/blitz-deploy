@@ -125,78 +125,77 @@ fn main() -> Result<()> {
         .read_json()
         .context("Failed to parse evaluation")?;
 
-        for attr in &evaluation.attributes {
-            if let Some(config_name) = attr.nixos_configuration_name()
-                && let Some(derivation_path) = attr.derivation_path()
+        if let Some(attr) = evaluation
+            .attributes
+            .iter()
+            .find(|attr| attr.nixos_configuration_name().as_deref() == Some(&nixos_config_name))
+        {
+            let derivation_path = attr
+                .derivation_path()
+                .context("Attribute has no derivation path")?;
+
+            let derivation: Derivation = ureq::get(&format!(
+                "https://hercules-ci.com/api/v1/accounts/{}/derivations/{}",
+                account.id,
+                url_encode(&derivation_path)
+            ))
+            .call()
+            .context("Failed to fetch derivation")?
+            .body_mut()
+            .read_json()
+            .context("Failed to parse derivation")?;
+
+            if let Some(output) = derivation
+                .outputs()
+                .find(|output| output.output_name == "out")
             {
-                if config_name != nixos_config_name {
-                    continue;
+                if let Action::Discover = &opts.action {
+                    println!("{}", output.output_path);
+                    return Ok(());
                 }
 
-                let derivation: Derivation = ureq::get(&format!(
-                    "https://hercules-ci.com/api/v1/accounts/{}/derivations/{}",
-                    account.id,
-                    url_encode(&derivation_path)
-                ))
-                .call()
-                .context("Failed to fetch derivation")?
-                .body_mut()
-                .read_json()
-                .context("Failed to parse derivation")?;
+                let current_toplevel = std::fs::read_link("/run/current-system")
+                    .context("Failed to find toplevel of current system")?;
 
-                if let Some(output) = derivation
-                    .outputs()
-                    .find(|output| output.output_name == "out")
-                {
-                    if let Action::Discover = &opts.action {
-                        println!("{}", output.output_path);
-                        break;
+                if output.output_path == current_toplevel {
+                    println!("Current system is recent. Skipping deployment.");
+                    return Ok(());
+                }
+
+                println!(
+                    "Realising toplevel for {}: {}",
+                    nixos_config_name, output.output_path
+                );
+
+                std::process::Command::new("nix-store")
+                    .arg("--realise")
+                    .arg(&output.output_path)
+                    .status()
+                    .context("Failed to realise output")?;
+
+                match &opts.action {
+                    Action::Discover => unreachable!(),
+                    Action::Realise => {}
+                    Action::Switch => {
+                        std::process::Command::new("run0")
+                            .arg("nixos-rebuild")
+                            .arg("--no-reexec")
+                            .arg("--store-path")
+                            .arg(&output.output_path)
+                            .arg("switch")
+                            .status()
+                            .context("Failed to switch to realised output")?;
                     }
-
-                    let current_toplevel = std::fs::read_link("/run/current-system")
-                        .context("Failed to find toplevel of current system")?;
-
-                    if output.output_path == current_toplevel {
-                        println!("Current system is recent. Skipping deployment.");
-                        break;
+                    Action::Boot => {
+                        std::process::Command::new("run0")
+                            .arg("nixos-rebuild")
+                            .arg("--no-reexec")
+                            .arg("--store-path")
+                            .arg(&output.output_path)
+                            .arg("boot")
+                            .status()
+                            .context("Failed to boot to realised output")?;
                     }
-
-                    println!(
-                        "Realising toplevel for {}: {}",
-                        config_name, output.output_path
-                    );
-
-                    std::process::Command::new("nix-store")
-                        .arg("--realise")
-                        .arg(&output.output_path)
-                        .status()
-                        .context("Failed to realise output")?;
-
-                    match &opts.action {
-                        Action::Discover => unreachable!(),
-                        Action::Realise => {}
-                        Action::Switch => {
-                            std::process::Command::new("run0")
-                                .arg("nixos-rebuild")
-                                .arg("--no-reexec")
-                                .arg("--store-path")
-                                .arg(&output.output_path)
-                                .arg("switch")
-                                .status()
-                                .context("Failed to switch to realised output")?;
-                        }
-                        Action::Boot => {
-                            std::process::Command::new("run0")
-                                .arg("nixos-rebuild")
-                                .arg("--no-reexec")
-                                .arg("--store-path")
-                                .arg(&output.output_path)
-                                .arg("boot")
-                                .status()
-                                .context("Failed to boot to realised output")?;
-                        }
-                    }
-                    break;
                 }
             }
         }
